@@ -2,7 +2,6 @@ import { console } from 'inspector';
 import * as vscode from 'vscode';
 
 export function activate(context: vscode.ExtensionContext) {
-    // Only allow a single Cat Coder
     let currentPanel: vscode.WebviewPanel | undefined = undefined;
 
     const previewCommand = vscode.commands.registerCommand('extension.openPreview', () => {
