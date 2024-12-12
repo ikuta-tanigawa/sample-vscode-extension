@@ -1,16 +1,59 @@
+import { console } from 'inspector';
 import * as vscode from 'vscode';
 
 export function activate(context: vscode.ExtensionContext) {
+    // Only allow a single Cat Coder
+    let currentPanel: vscode.WebviewPanel | undefined = undefined;
+
     const previewCommand = vscode.commands.registerCommand('extension.openPreview', () => {
-        const panel = vscode.window.createWebviewPanel(
-            'filePreview', // 識別子
-            'File Preview', // タイトル
-            vscode.ViewColumn.Two, // 表示する列
-            {
-                enableScripts: true,
+        if (currentPanel) {
+            currentPanel.reveal(vscode.ViewColumn.Two);
+        } else {
+            const editor = vscode.window.activeTextEditor;
+            const document = editor?.document;
+            // パネル作成
+            currentPanel = vscode.window.createWebviewPanel(
+                'filePreview', // 識別子
+                'File Preview', // タイトル
+                vscode.ViewColumn.Two, // 表示する列
+                {
+                    enableScripts: true,
+                }
+            );
+            currentPanel.webview.html = getWebViewContent(currentPanel, context.extensionUri);
+            // 初期のテキストを送る
+            if (document) {
+                currentPanel.webview.postMessage({ command: 'updateText', text: document.getText(), uri: document.uri.toString(), fileName: document.fileName });
             }
-        );
-        panel.webview.html = getWebViewContent(panel, context.extensionUri);
+            // WebViewからのメッセージ受信
+            currentPanel.webview.onDidReceiveMessage(
+                async message => {
+                    switch (message.command) {
+                        case 'updateTextOnWebView':
+                            const uri = vscode.Uri.parse(message.uri, true);
+                            const document = await vscode.workspace.openTextDocument(uri);
+                            const fullRange = new vscode.Range(
+                                document.positionAt(0),
+                                document.positionAt(document.getText().length)
+                            );
+                            const edit = new vscode.WorkspaceEdit();
+                            edit.replace(uri, fullRange, message.text);
+                            await vscode.workspace.applyEdit(edit);
+                            break;
+                    }
+                },
+                undefined,
+                context.subscriptions
+            );
+            // 閉じられた時の処理
+            currentPanel.onDidDispose(
+                () => {
+                  currentPanel = undefined;
+                },
+                undefined,
+                context.subscriptions
+            );
+        }
     });
     context.subscriptions.push(previewCommand);
 
@@ -18,10 +61,31 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.onDidChangeActiveTextEditor(editor => {
         if (editor?.document.fileName.endsWith('.txt')) {
             vscode.commands.executeCommand('setContext', 'showPreviewButton', true);
+            if (currentPanel) {
+                const document = editor.document;
+                currentPanel.webview.postMessage({ command: 'updateText', text: document.getText(), uri: document.uri.toString(), fileName: document.fileName });
+            }
         } else {
             vscode.commands.executeCommand('setContext', 'showPreviewButton', false);
         }
     });
+
+    // テキスト編集を監視
+    vscode.workspace.onDidChangeTextDocument(e => {
+        if (currentPanel) {
+            const document = e.document;
+            currentPanel.webview.postMessage({ command: 'updateText', text: document.getText(), uri: document.uri.toString(), fileName: document.fileName });
+        }
+    });
+
+    // 初期化時に現在のエディタを確認
+    const activeEditor = vscode.window.activeTextEditor;
+    if (activeEditor) {
+        const isTxtFile = activeEditor.document.fileName.endsWith('.txt');
+        vscode.commands.executeCommand('setContext', 'showPreviewButton', isTxtFile);
+    } else {
+        vscode.commands.executeCommand('setContext', 'showPreviewButton', false);
+    }
 }
 
 function getWebViewContent(panel : vscode.WebviewPanel, extensionUri : vscode.Uri): string {
@@ -42,30 +106,3 @@ function getWebViewContent(panel : vscode.WebviewPanel, extensionUri : vscode.Ur
 }
 
 export function deactivate() {}
-
-/*
-export function activate(context: vscode.ExtensionContext) {
-    let disposable = vscode.commands.registerCommand('extension.getTextContent', () => {
-        // 現在アクティブなエディターを取得
-        const editor = vscode.window.activeTextEditor;
-
-        if (editor) {
-            // ドキュメントの内容を取得
-            const document = editor.document;
-            const text = document.getText();
-
-            // コンソールに出力
-            console.log('Current file content:', text);
-
-            // メッセージ表示（オプション）
-            vscode.window.showInformationMessage('Content retrieved. Check the console.');
-        } else {
-            vscode.window.showErrorMessage('No active editor found.');
-        }
-    });
-
-    context.subscriptions.push(disposable);
-}
-
-export function deactivate() {}
-*/
